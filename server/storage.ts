@@ -1,38 +1,75 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
 
-// modify the interface with any CRUD methods
-// you might need
+import { db } from "./db";
+import { labs, type Lab, type InsertLab } from "@shared/schema";
+import { eq, desc } from "drizzle-orm";
 
-export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
-}
+export const storage = {
+  // Lab operations
+  async getAllLabs(): Promise<Lab[]> {
+    return await db.select().from(labs).orderBy(desc(labs.submittedAt));
+  },
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
+  async getLabById(id: number): Promise<Lab | undefined> {
+    const result = await db.select().from(labs).where(eq(labs.id, id));
+    return result[0];
+  },
 
-  constructor() {
-    this.users = new Map();
-  }
+  async getLabsByStatus(status: string): Promise<Lab[]> {
+    return await db.select().from(labs).where(eq(labs.status, status)).orderBy(desc(labs.submittedAt));
+  },
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
-  }
+  async createLab(lab: Omit<InsertLab, 'id' | 'submittedAt' | 'reviewedAt'>): Promise<Lab> {
+    const result = await db.insert(labs).values({
+      ...lab,
+      status: "pending",
+    }).returning();
+    return result[0];
+  },
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
-  }
+  async updateLabStatus(
+    id: number,
+    status: string,
+    reviewerNotes?: string,
+    rejectionReason?: string
+  ): Promise<Lab | undefined> {
+    const result = await db
+      .update(labs)
+      .set({
+        status,
+        reviewedAt: new Date(),
+        reviewerNotes,
+        rejectionReason,
+      })
+      .where(eq(labs.id, id))
+      .returning();
+    return result[0];
+  },
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
-  }
-}
+  async updateLab(id: number, data: Partial<InsertLab>): Promise<Lab | undefined> {
+    const result = await db
+      .update(labs)
+      .set(data)
+      .where(eq(labs.id, id))
+      .returning();
+    return result[0];
+  },
 
-export const storage = new MemStorage();
+  async deleteLab(id: number): Promise<void> {
+    await db.delete(labs).where(eq(labs.id, id));
+  },
+
+  async getLabStats(): Promise<{
+    total: number;
+    pending: number;
+    approved: number;
+    rejected: number;
+  }> {
+    const allLabs = await this.getAllLabs();
+    return {
+      total: allLabs.length,
+      pending: allLabs.filter(lab => lab.status === "pending").length,
+      approved: allLabs.filter(lab => lab.status === "approved").length,
+      rejected: allLabs.filter(lab => lab.status === "rejected").length,
+    };
+  },
+};
