@@ -1,111 +1,261 @@
-
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertLabSchema } from "@shared/schema";
+import { setupAuth, isAuthenticated, isAdmin, isAuthor } from "./replitAuth";
+import { createLabSchema } from "@shared/schema";
+import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Get all labs
-  app.get("/api/labs", async (_req, res) => {
+  // Auth middleware
+  await setupAuth(app);
+
+  // Auth routes
+  app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
     try {
-      const labs = await storage.getAllLabs();
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      res.json(user);
+    } catch (error) {
+      console.error("Error fetching user:", error);
+      res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  // Lab routes for authors
+  app.post('/api/labs', isAuthenticated, isAuthor, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const labData = createLabSchema.parse(req.body);
+      
+      const lab = await storage.createLab({
+        ...labData,
+        authorId: userId,
+        status: "draft",
+        reviewComment: null,
+      });
+
+      res.json(lab);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid lab data", errors: error.errors });
+      }
+      console.error("Error creating lab:", error);
+      res.status(500).json({ message: "Failed to create lab" });
+    }
+  });
+
+  app.get('/api/labs', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      const { status } = req.query;
+
+      let labs;
+      if (user?.role === "admin") {
+        // Admins can see all labs
+        labs = status ? await storage.getLabsByStatus(status as string) : await storage.getAllLabs();
+      } else {
+        // Authors only see their own labs
+        labs = await storage.getLabsByAuthor(userId);
+        if (status) {
+          labs = labs.filter(lab => lab.status === status);
+        }
+      }
+
       res.json(labs);
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
+    } catch (error) {
+      console.error("Error fetching labs:", error);
+      res.status(500).json({ message: "Failed to fetch labs" });
     }
   });
 
-  // Get labs by status
-  app.get("/api/labs/status/:status", async (req, res) => {
+  app.get('/api/labs/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const { status } = req.params;
-      const labs = await storage.getLabsByStatus(status);
-      res.json(labs);
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  // Get lab stats
-  app.get("/api/labs/stats", async (_req, res) => {
-    try {
-      const stats = await storage.getLabStats();
-      res.json(stats);
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  // Get single lab
-  app.get("/api/labs/:id", async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const lab = await storage.getLabById(id);
+      const labId = parseInt(req.params.id);
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      const lab = await storage.getLabById(labId);
+      
       if (!lab) {
         return res.status(404).json({ message: "Lab not found" });
       }
-      res.json(lab);
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
 
-  // Create lab
-  app.post("/api/labs", async (req, res) => {
-    try {
-      const result = insertLabSchema.safeParse(req.body);
-      if (!result.success) {
-        return res.status(400).json({ message: "Invalid lab data", errors: result.error });
+      // Check permissions: admin can see all, authors can only see their own
+      if (user?.role !== "admin" && lab.authorId !== userId) {
+        return res.status(403).json({ message: "Forbidden" });
       }
-      const lab = await storage.createLab(result.data);
-      res.status(201).json(lab);
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
+
+      res.json(lab);
+    } catch (error) {
+      console.error("Error fetching lab:", error);
+      res.status(500).json({ message: "Failed to fetch lab" });
     }
   });
 
-  // Update lab
-  app.patch("/api/labs/:id", async (req, res) => {
+  app.put('/api/labs/:id', isAuthenticated, isAuthor, async (req: any, res) => {
     try {
-      const id = parseInt(req.params.id);
-      const lab = await storage.updateLab(id, req.body);
+      const labId = parseInt(req.params.id);
+      const userId = req.user.claims.sub;
+      
+      const lab = await storage.getLabById(labId);
+      
       if (!lab) {
         return res.status(404).json({ message: "Lab not found" });
       }
-      res.json(lab);
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
+
+      // Authors can only edit their own labs
+      if (lab.authorId !== userId) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      // Can only edit drafts
+      if (lab.status !== "draft") {
+        return res.status(400).json({ message: "Can only edit draft labs" });
+      }
+
+      const updatedLab = await storage.updateLab(labId, req.body);
+      res.json(updatedLab);
+    } catch (error) {
+      console.error("Error updating lab:", error);
+      res.status(500).json({ message: "Failed to update lab" });
     }
   });
 
-  // Review lab (approve/reject)
-  app.post("/api/labs/:id/review", async (req, res) => {
+  app.post('/api/labs/:id/submit', isAuthenticated, isAuthor, async (req: any, res) => {
     try {
-      const id = parseInt(req.params.id);
-      const { status, reviewerNotes, rejectionReason } = req.body;
-
-      if (!["approved", "rejected"].includes(status)) {
-        return res.status(400).json({ message: "Invalid status. Must be 'approved' or 'rejected'" });
-      }
-
-      const lab = await storage.updateLabStatus(id, status, reviewerNotes, rejectionReason);
+      const labId = parseInt(req.params.id);
+      const userId = req.user.claims.sub;
+      
+      const lab = await storage.getLabById(labId);
+      
       if (!lab) {
         return res.status(404).json({ message: "Lab not found" });
       }
-      res.json(lab);
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
+
+      if (lab.authorId !== userId) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      if (lab.status !== "draft") {
+        return res.status(400).json({ message: "Lab already submitted" });
+      }
+
+      const updatedLab = await storage.updateLabStatus(labId, "pending");
+      
+      // Create audit log
+      await storage.createAuditLog({
+        labId,
+        actorId: userId,
+        action: "submit",
+        oldStatus: "draft",
+        newStatus: "pending",
+      });
+
+      res.json(updatedLab);
+    } catch (error) {
+      console.error("Error submitting lab:", error);
+      res.status(500).json({ message: "Failed to submit lab" });
     }
   });
 
-  // Delete lab
-  app.delete("/api/labs/:id", async (req, res) => {
+  // Admin routes
+  app.post('/api/labs/:id/approve', isAuthenticated, isAdmin, async (req: any, res) => {
     try {
-      const id = parseInt(req.params.id);
-      await storage.deleteLab(id);
-      res.status(204).send();
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      const labId = parseInt(req.params.id);
+      const userId = req.user.claims.sub;
+      const { comment } = req.body;
+      
+      const lab = await storage.getLabById(labId);
+      
+      if (!lab) {
+        return res.status(404).json({ message: "Lab not found" });
+      }
+
+      if (lab.status !== "pending") {
+        return res.status(400).json({ message: "Can only approve pending labs" });
+      }
+
+      const updatedLab = await storage.updateLabStatus(labId, "approved", comment);
+      
+      // Create audit log
+      await storage.createAuditLog({
+        labId,
+        actorId: userId,
+        action: "approve",
+        oldStatus: "pending",
+        newStatus: "approved",
+        comment,
+      });
+
+      // TODO: Send email notification to author
+
+      res.json(updatedLab);
+    } catch (error) {
+      console.error("Error approving lab:", error);
+      res.status(500).json({ message: "Failed to approve lab" });
+    }
+  });
+
+  app.post('/api/labs/:id/reject', isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const labId = parseInt(req.params.id);
+      const userId = req.user.claims.sub;
+      const { comment } = req.body;
+      
+      const lab = await storage.getLabById(labId);
+      
+      if (!lab) {
+        return res.status(404).json({ message: "Lab not found" });
+      }
+
+      if (lab.status !== "pending") {
+        return res.status(400).json({ message: "Can only reject pending labs" });
+      }
+
+      const updatedLab = await storage.updateLabStatus(labId, "rejected", comment);
+      
+      // Create audit log
+      await storage.createAuditLog({
+        labId,
+        actorId: userId,
+        action: "reject",
+        oldStatus: "pending",
+        newStatus: "rejected",
+        comment,
+      });
+
+      // TODO: Send email notification to author
+
+      res.json(updatedLab);
+    } catch (error) {
+      console.error("Error rejecting lab:", error);
+      res.status(500).json({ message: "Failed to reject lab" });
+    }
+  });
+
+  app.get('/api/labs/:id/history', isAuthenticated, async (req: any, res) => {
+    try {
+      const labId = parseInt(req.params.id);
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      const lab = await storage.getLabById(labId);
+      
+      if (!lab) {
+        return res.status(404).json({ message: "Lab not found" });
+      }
+
+      // Check permissions
+      if (user?.role !== "admin" && lab.authorId !== userId) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const history = await storage.getLabAuditHistory(labId);
+      res.json(history);
+    } catch (error) {
+      console.error("Error fetching lab history:", error);
+      res.status(500).json({ message: "Failed to fetch lab history" });
     }
   });
 

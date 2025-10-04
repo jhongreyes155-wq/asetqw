@@ -1,0 +1,223 @@
+Below is a **complete, step‑by‑step plan** that takes the “lab‑management + admin‑review” idea and turns it into a **full‑stack application that you can run locally + deploy on Replit**.  
+Feel free to cherry‑pick/modify any part that better matches your constraints.
+
+---
+
+## 1.  High‑level Overview
+
+| Layer | What it does | Why it’s chosen |
+|-------|--------------|------------------|
+| **Frontend** | React (Next.js) + Tailwind CSS | SSR / static‑site generation, built‑in routing, zero‑config API routes |
+| **Backend** | Node.js + Express API (REST + webhook) | Simple CRUD, easy to unit‑test, aligns with Replit’s “Express” template |
+| **Database** | PostgreSQL | ACID compliance, Replit’s Postgres addon or local Docker |
+| **Auth** | Replit Auth (or custom JWT + session) | Replit gives you out‑of‑the‑box login – no need for Cognito / Auth0 |
+| **Email** | Mailgun / SendGrid (dev: Mailtrap) | Send notifications on approve/reject |
+| **Deployment / Local dev** | Docker‑compose for local; Replit’s “Run” button for cloud | Same codebase runs everywhere |
+
+```
+  ┌─────────────────────────────┐   ┌───────────────────────┐
+  │    Browser (React/Next.js)  │   │  Replit (Node/Express) │
+  └───────▲───────────────▲──────┘   └────▲────────────────▲───┘
+          │               │            │            │
+          │ API request   │            │            │
+          └───────────────┘            │            │
+                                       │            │
+                                       ▼            ▼
+                                 PostgreSQL DB   ─────── Mailgun
+```
+
+---
+
+## 2.  Project Skeleton (one repository)
+
+```
+mcp-lab-manager/
+├─ frontend/         # Next.js + Tailwind
+├─ backend/          # Express API
+├─ db/               # SQL migration scripts
+├─ docker-compose.yml
+├─ .env.example
+├─ yarn.lock / package.json
+└─ README.md
+```
+
+*All code lives under the one repo so `docker-compose` can spin both services up together.*
+
+---
+
+## 3.  Database Schema
+
+| Table | Purpose | Key Columns |
+|-------|---------|-------------|
+| **users** | Stores authors & admins | `id PK`, `email`, `password_hash`, `role` (admin|author) |
+| **labs** | Lab submissions | `id PK`, `title`, `body`, `status` (draft|pending|approved|rejected) |
+| **lab_tags** | Many‑to‑many tags | `lab_id`, `tag` |
+| **audit_log** | Record of status transitions | `id PK`, `lab_id`, `changed_by_user_id`, `old_status`, `new_status`, `timestamp` |
+| **comments** | Rejected‑lab feedback | `id PK`, `lab_id`, `author` (author id), `text`, `created_at` |
+
+> **PostgreSQL migrations** via `knex` or `sequelize-cli`.
+
+---
+
+## 4.  Backend API
+
+### 4.1  Auth
+- `/api/auth/login` – accepts email/password, returns JWT (or Replit Auth token).  
+- `/api/auth/me` – returns current user.  
+
+> **Auth Guard** – middleware `requireAuth(role?)` for routes.
+
+### 4.2  Lab Endpoints
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| POST | `/api/labs/` | Create new lab (draft) | Author |
+| PUT | `/api/labs/:id` | Edit a draft | Author & owner |
+| POST | `/api/labs/:id/submit` | Change status=“pending” | Author & owner |
+| GET | `/api/labs/` | List labs (filtered by role) | Auth |
+| GET | `/api/labs/:id` | Lab detail | Author (own) or Admin |
+| POST | `/api/labs/:id/approve` | Approve + email | Admin |
+| POST | `/api/labs/:id/reject` | Reject + comments + email | Admin |
+
+### 4.3  Audit / History Endpoints
+- `/api/labs/:id/history` – returns audit_log entries for a lab.  
+
+> These endpoints can optionally be throttled for abuse.
+
+---
+
+## 5.  Frontend (Next.js)
+
+### 5.1  Pages & Components
+| Page | Purpose | Auth |
+|------|---------|------|
+| `/login` | Sign‑in | Any |
+| `/` (dashboard) | Overview | Logged in |
+| `/labs/new` | Author create form | Author |
+| `/labs/[id]/edit` | Edit own draft | Author |
+| `/labs/[id]` | Lab detail | Author (own) / Admin |
+| `/admin/queue` | Review queue | Admin |
+| `/admin/all` | All labs | Admin |
+| `/profile` | User profile | Auth |
+
+### 5.2  Layouts
+- **AuthWrapper** – redirects to `/login` when unauthenticated.  
+- **RoleNavbar** – shows Admin or Author menu items.
+
+### 5.3  API Integration
+- Use `next/axios` or `react-query` to fetch data.  
+- Optimistic UI updates on approve/reject so transition feels instant.
+
+### 5.4  Notifications
+- Use `<Toast>` component (Tailwind / Headless UI) to show “Lab approved!” / “Lab rejected” messages.
+- Emails are sent in the backend with SendGrid/Mailgun; local dev can use Mailtrap.
+
+---
+
+## 6.  Email Notification Flow
+
+1. **Approve** → API route updates status, logs audit, sends email: *“Your lab … has been approved.”*
+2. **Reject** → Adds comment, logs audit, sends email + comment: *“Unfortunately, your lab … has been rejected. Feedback: …”*
+
+> For dev you can output emails to console or Mailtrap inbox.
+
+---
+
+## 7.  Deployment Paths
+
+| Platform | How to run | Notes |
+|----------|------------|-------|
+| **Replit** | `frontend` + `backend` run as a single Replit app (use `Procfile` to launch both). | Replit’s Postgres addon = DB. |
+| **Docker Compose** | `docker-compose up --build` | Works on your laptop; uses a Dockerized Postgres. |
+| **Vercel + Railway** | Frontend on Vercel, backend on Railway (free tier). | Separate repo is optional. |
+
+> **Common Dockerfile** (backend)
+
+```dockerfile
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 3000
+CMD ["node","dist/index.js"]
+```
+
+> *Use `nodemon` in dev mode.*
+
+---
+
+## 8.  Local Development Checklist
+
+1. **Clone repo**
+   ```bash
+   git clone https://github.com/you/mcp-lab-manager
+   cd mcp-lab-manager
+   ```
+2. **Set up .env**
+   ```bash
+   cp .env.example .env
+   # edit DB_URL, JWT_SECRET, EMAIL_* etc.
+   ```
+3. **Start Postgres locally** (or use Docker Compose)
+   ```bash
+   docker compose up -d db
+   ```
+4. **Run migrations**
+   ```bash
+   cd backend
+   npm run migrate
+   ```
+5. **Run backend & frontend**
+   ```bash
+   cd frontend
+   npm run dev &
+   cd ../backend
+   npm run dev
+   ```
+6. **Open** `http://localhost:3000` – you’re all set.
+
+---
+
+## 9.  Milestones (Sprint‑style)
+
+| Sprint | Time | Deliverables |
+|--------|------|--------------|
+| 1 | 1 wk | Repo scaffold, local Docker, DB migrations, auth endpoints. |
+| 2 | 1 wk | Lab CRUD API, author frontend pages. |
+| 3 | 1 wk | Admin review queue, approve/reject logic, email stub. |
+| 4 | 1 wk | Audit trail, comments, UI polish. |
+| 5 | 0.5 wk | Deploy to Replit + test on real users. |
+| 6 | 0.5 wk | Optional: CI/CD (GitHub Actions) + Docker Hub. |
+
+> Adjust sprint durations as you see fit.
+
+---
+
+## 10.  Final Touches
+
+1. **Unit & Integration Tests** – `jest` + `supertest` for backend; `Playwright` for E2E.  
+2. **Accessibility** – Tailwind + Headless UI; run `axe-core`.  
+3. **Documentation** – `README.md` with setup, API docs, role matrix.  
+4. **Monitoring** – Use `winston` + `node‑statsd` for logs; optional CloudWatch export.
+
+---
+
+### Quick Start Commands (single line)
+
+```bash
+# Setup local env
+docker compose up -d db && \
+cd backend && npm install && npm run migrate && \
+cd ../frontend && npm install && \
+npm run dev &
+cd ../backend && npm run dev
+```
+
+---
+
+**Let me know**  
+- Which milestones you want first.  
+- If you prefer a different auth system (e.g., JWT instead of Replit Auth).  
+- Any UI design mock‑ups or branding.
+
+We’ll proceed with the plan that best fits your workflow!
