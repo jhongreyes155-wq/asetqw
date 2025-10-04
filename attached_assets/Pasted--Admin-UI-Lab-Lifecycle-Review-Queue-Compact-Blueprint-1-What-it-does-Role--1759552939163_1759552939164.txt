@@ -1,0 +1,113 @@
+## Admin UI – Lab Lifecycle + Review Queue (Compact Blueprint)
+
+### 1️⃣ What it does  
+
+| Role | View / Action |
+|------|---------------|
+| **Admin** | • Lists **pending** labs<br>• Approve / Reject / Re‑open<br>• View/edit any lab<br>• View review history  |
+| **Author** | • Create / edit own labs (draft)<br>• Submit for review (draft → pending)<br>• See status & admin comments |
+
+### 2️⃣ Data Model (DynamoDB / Strapi)
+
+```
+labs { id, title, slug, description, authorId, tags[], difficulty,
+        price, license, assetS3Key, status, reviewComment,
+        createdAt, updatedAt }
+audit { auditId, labId, actorId, action, payload, timestamp }
+```
+`status` ∈ {draft, pending, approved, rejected}
+
+### 3️⃣ API (REST – Lambda + API‑Gateway)
+
+| Path | Method | Role | Action |
+|------|--------|------|--------|
+| `/labs` | GET | admin / author | List labs (filter by status) |
+| `/labs` | POST | author | Create draft |
+| `/labs/{id}` | GET | author / admin | Lab detail |
+| `/labs/{id}` | PUT | author (own) | Update draft / edit approved |
+| `/labs/{id}/status` | PATCH | admin | `{status:"approved"|"rejected"|"draft", comment?:string}` |
+| `/labs/{id}/reopen` | POST | admin | Set status → pending |
+
+> **Auth** – Cognito JWT; `role` claim (`admin` / `author`).  
+> **Audit** – every status change writes to `audit` table.
+
+### 4️⃣ Admin UI (Next.js + Tailwind)
+
+```tsx
+// pages/admin/index.tsx
+const { data: labs, refetch } = useQuery('labs', () => getLabs({status:'pending'}));
+const approve = useMutation(approveLab, {onSuccess:refetch});
+const reject = useMutation(rejectLab, {onSuccess:refetch});
+
+return (
+  <>
+    <h2>Pending Labs</h2>
+    <Table>
+      <thead><tr><th>Title</th><th>Author</th><th>Submitted</th><th>Action</th></tr></thead>
+      <tbody>
+        {labs?.map(l => (
+          <tr key={l.id}>
+            <td>{l.title}</td><td>{l.authorName}</td><td>{human(l.createdAt)}</td>
+            <td>
+              <Button onClick={() => setOpen(l.id)}>Review</Button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </Table>
+
+    <Modal opened={!!open} onClose={()=>setOpen(null)} title="Review">
+      <textarea onChange={e=>setComment(e.target.value)} />
+      <Button onClick={()=>approve.mutate({id:open, comment})}>Approve</Button>
+      <Button color="red" onClick={()=>reject.mutate({id:open, comment})}>Reject</Button>
+    </Modal>
+  </>
+);
+```
+
+*`withAuth` wrapper* checks JWT and `role`.  
+
+### 5️⃣ Lab Detail Edit (Author)
+
+```tsx
+// pages/admin/labs/[id].tsx
+const { data: lab } = useQuery(['lab', id], () => getLab(id));
+
+const [title,setTitle] = useState(lab?.title);
+const [status,setStatus] = useState(lab?.status);
+
+const save = () => updateLab(id,{title,status});
+// Re‑open → set `status` → pending
+```
+
+### 6️⃣ Email/Notifications  
+
+SES (or SendGrid) when:
+
+1. **Draft → Pending** – author “submitted for review”.  
+2. **Approved / Rejected** – author receives status + admin comment.
+
+```ts
+await ses.sendEmail({
+  Destination:{ToAddresses:[authorEmail]},
+  Message:{Subject:{Data:subject},Body:{Text:{Data:body}}},
+  Source:process.env.SES_FROM
+});
+```
+
+### 7️⃣ Quick Deployment
+
+1. **Cognito** – groups `admin`, `author`; add `role` claim via Pre‑Token trigger.  
+2. **API** – API Gateway + Lambda (Node 18).  
+3. **Data** – DynamoDB `Labs`, `Audit`.  
+4. **Admin Portal** – Next.js → Amplify Console (or Vercel).  
+5. **IAM** – `admin-role` : full CRUD + SES; `author-role` : CRUD own labs.  
+
+### 8️⃣ Summary
+
+- **Back‑end**: small, server‑less API that enforces roles and logs actions.  
+- **Front‑end**: admin dashboard with a review queue, detail view, and simple modal for approve/reject.  
+- **Security**: role‑based auth, least‑privilege IAM, audit log.  
+- **Scalability**: DynamoDB + Lambda runs on free tier for thousands of labs; cost grows only with usage.  
+
+Drop this blueprint into your repo, replace the dummy service endpoints, and you’ll have a fully‑functional admin review process in under a few days. Happy building!
