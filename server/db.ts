@@ -1,13 +1,12 @@
+// db.ts
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import { sql } from "drizzle-orm";
 
-import { drizzle } from "drizzle-orm/neon-serverless";
-import { neonConfig, Pool } from "@neondatabase/serverless";
-import ws from "ws";
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }, // Neon requires ssl
+});
 
-neonConfig.webSocketConstructor = ws;
-
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL must be set. Did you forget to provision a database?");
-}
-
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-export const db = drizzle({ client: pool });
+export const db = drizzle(pool, { mode: "postgresql" });
+export const raw = sql; // for raw queries if you need them
