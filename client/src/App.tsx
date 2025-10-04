@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -11,6 +11,8 @@ import RoleSelector from "@/pages/RoleSelector";
 import AdminReviewQueue from "@/pages/AdminReviewQueue";
 import AuthorLabs from "@/pages/AuthorLabs";
 import CreateLab from "@/pages/CreateLab";
+import { useEffect, useState } from "react";
+import { api } from "./lib/api";
 
 function AdminLayout({ children }: { children: React.ReactNode }) {
   const style = {
@@ -61,16 +63,46 @@ function AuthorLayout({ children }: { children: React.ReactNode }) {
 }
 
 function Router() {
+  const [, setLocation] = useLocation();
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  const checkAuth = async () => {
+    try {
+      await api.getCurrentUser();
+      setIsAuthenticated(true);
+    } catch (error) {
+      setIsAuthenticated(false);
+      // Redirect to login
+      window.location.href = '/api/login';
+    }
+  };
+
+  if (isAuthenticated === null) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <p className="text-muted-foreground">Loading...</p>
+      </div>
+    );
+  }
+
+  if (isAuthenticated === false) {
+    return null;
+  }
+
   return (
     <Switch>
       <Route path="/" component={RoleSelector} />
-      
+
       <Route path="/admin/review">
         <AdminLayout>
           <AdminReviewQueue />
         </AdminLayout>
       </Route>
-      
+
       <Route path="/admin/labs">
         <AdminLayout>
           <div className="p-6">
@@ -79,7 +111,7 @@ function Router() {
           </div>
         </AdminLayout>
       </Route>
-      
+
       <Route path="/admin/settings">
         <AdminLayout>
           <div className="p-6">
@@ -88,19 +120,19 @@ function Router() {
           </div>
         </AdminLayout>
       </Route>
-      
+
       <Route path="/author/labs">
         <AuthorLayout>
           <AuthorLabs />
         </AuthorLayout>
       </Route>
-      
+
       <Route path="/author/labs/new">
         <AuthorLayout>
           <CreateLab />
         </AuthorLayout>
       </Route>
-      
+
       <Route path="/author/labs/:id/edit">
         <AuthorLayout>
           <div className="p-6">
@@ -109,7 +141,7 @@ function Router() {
           </div>
         </AuthorLayout>
       </Route>
-      
+
       <Route path="/author/labs/:id">
         <AuthorLayout>
           <div className="p-6">
@@ -118,7 +150,7 @@ function Router() {
           </div>
         </AuthorLayout>
       </Route>
-      
+
       <Route path="/author/profile">
         <AuthorLayout>
           <div className="p-6">
@@ -127,7 +159,7 @@ function Router() {
           </div>
         </AuthorLayout>
       </Route>
-      
+
       <Route component={NotFound} />
     </Switch>
   );
