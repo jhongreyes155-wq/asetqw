@@ -7,10 +7,12 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import NotFound from "@/pages/not-found";
+import Login from "@/pages/Login";
 import RoleSelector from "@/pages/RoleSelector";
 import AdminReviewQueue from "@/pages/AdminReviewQueue";
 import AuthorLabs from "@/pages/AuthorLabs";
 import CreateLab from "@/pages/CreateLab";
+import DiscordMessageSender from "@/components/DiscordMessageSender";
 import { useEffect, useState } from "react";
 import { api } from "./lib/api";
 
@@ -27,7 +29,12 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
         <div className="flex flex-col flex-1">
           <header className="flex items-center justify-between p-4 border-b">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
-            <ThemeToggle />
+            <div className="flex items-center gap-4">
+              <ThemeToggle />
+              <a href="/api/logout" className="underline text-muted-foreground hover:text-foreground">
+                Logout
+              </a>
+            </div>
           </header>
           <main className="flex-1 overflow-auto">
             {children}
@@ -51,7 +58,12 @@ function AuthorLayout({ children }: { children: React.ReactNode }) {
         <div className="flex flex-col flex-1">
           <header className="flex items-center justify-between p-4 border-b">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
-            <ThemeToggle />
+            <div className="flex items-center gap-4">
+              <ThemeToggle />
+              <a href="/api/logout" className="underline text-muted-foreground hover:text-foreground">
+                Logout
+              </a>
+            </div>
           </header>
           <main className="flex-1 overflow-auto">
             {children}
@@ -114,10 +126,7 @@ function Router() {
 
       <Route path="/admin/settings">
         <AdminLayout>
-          <div className="p-6">
-            <h1 className="text-2xl font-semibold">Settings</h1>
-            <p className="text-muted-foreground mt-2">Configure system settings</p>
-          </div>
+          <DiscordMessageSender />
         </AdminLayout>
       </Route>
 

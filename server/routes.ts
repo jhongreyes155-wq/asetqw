@@ -5,20 +5,40 @@ import { setupAuth, isAuthenticated, isAdmin, isAuthor } from "./replitAuth";
 import { createLabSchema } from "@shared/schema";
 import { z } from "zod";
 
+async function sendDiscordNotification(message: string) {
+  try {
+    await fetch('https://discord.com/api/webhooks/1423976541343187016/9iYnct1P1J1IYBJIbBpeOE94UvSWkKhNrE7WefOFb6jarscMtm_k43gu_MUgOKjJrN-8', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: message })
+    });
+  } catch (error) {
+    console.error('Failed to send Discord notification:', error);
+  }
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Auth middleware
-  await setupAuth(app);
 
   // Auth routes
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
+      if (process.env.NODE_ENV === "development" && userId === "dev-user") {
+        return res.json({ id: "dev-user", email: "dev@example.com", firstName: "Dev", lastName: "User", role: "admin" });
+      }
       const user = await storage.getUser(userId);
       res.json(user);
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
     }
+  });
+
+  // Logout route
+  app.get('/api/logout', (req: any, res) => {
+    req.logout(() => {
+      res.redirect('/');
+    });
   });
 
   // Lab routes for authors
@@ -190,6 +210,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // TODO: Send email notification to author
 
+      sendDiscordNotification(`Lab "${lab.title}" has been approved.`);
+
       res.json(updatedLab);
     } catch (error) {
       console.error("Error approving lab:", error);
@@ -227,6 +249,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // TODO: Send email notification to author
 
+      sendDiscordNotification(`Lab "${lab.title}" has been rejected. Comment: ${comment || 'No comment'}`);
+
       res.json(updatedLab);
     } catch (error) {
       console.error("Error rejecting lab:", error);
@@ -256,6 +280,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching lab history:", error);
       res.status(500).json({ message: "Failed to fetch lab history" });
+    }
+  });
+
+  // Discord message sending
+  app.post('/api/discord/send', isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const { message } = req.body;
+      if (!message) {
+        return res.status(400).json({ message: "Message is required" });
+      }
+      await sendDiscordNotification(message);
+      res.json({ status: 'sent' });
+    } catch (error) {
+      console.error("Error sending Discord message:", error);
+      res.status(500).json({ message: "Failed to send message" });
     }
   });
 
