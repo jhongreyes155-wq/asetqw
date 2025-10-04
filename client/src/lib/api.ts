@@ -13,7 +13,7 @@ export const api = {
 
   // Get labs by status
   getLabsByStatus: async (status: string): Promise<Lab[]> => {
-    const response = await fetch(`${API_BASE}/labs/status/${status}`);
+    const response = await fetch(`${API_BASE}/labs?status=${status}`);
     if (!response.ok) throw new Error("Failed to fetch labs");
     return response.json();
   },
