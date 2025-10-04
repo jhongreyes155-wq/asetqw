@@ -1,4 +1,5 @@
-import { useState } from "react";
+
+import { useState, useEffect } from "react";
 import { LabCard } from "@/components/LabCard";
 import { StatsCard } from "@/components/StatsCard";
 import { Button } from "@/components/ui/button";
@@ -6,79 +7,77 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FileText, Clock, CheckCircle, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
-
-//todo: remove mock functionality - replace with real API calls
-const mockLabs = [
-  {
-    id: "1",
-    title: "Introduction to React Hooks",
-    description: "Learn the fundamentals of React Hooks including useState, useEffect, and custom hooks with practical examples.",
-    status: "draft" as const,
-    authorName: "You",
-    updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
-  },
-  {
-    id: "2",
-    title: "Advanced TypeScript Patterns",
-    description: "Explore advanced TypeScript patterns including generics, conditional types, and mapped types.",
-    status: "draft" as const,
-    authorName: "You",
-    updatedAt: new Date(Date.now() - 5 * 60 * 60 * 1000),
-  },
-  {
-    id: "3",
-    title: "Building RESTful APIs",
-    description: "A comprehensive guide to building scalable RESTful APIs using Node.js and Express.",
-    status: "pending" as const,
-    authorName: "You",
-    updatedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
-  },
-  {
-    id: "4",
-    title: "CSS Grid Layout Mastery",
-    description: "Master CSS Grid Layout with practical examples and real-world projects.",
-    status: "approved" as const,
-    authorName: "You",
-    updatedAt: new Date(Date.now() - 48 * 60 * 60 * 1000),
-  },
-];
+import { api } from "@/lib/api";
+import type { Lab } from "@shared/schema";
 
 export default function AuthorLabs() {
-  const [labs, setLabs] = useState(mockLabs);
+  const [labs, setLabs] = useState<Lab[]>([]);
+  const [loading, setLoading] = useState(true);
   const { toast } = useToast();
   const [, setLocation] = useLocation();
+
+  useEffect(() => {
+    loadLabs();
+  }, []);
+
+  const loadLabs = async () => {
+    try {
+      setLoading(true);
+      const data = await api.getLabs();
+      setLabs(data);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to load labs",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const draftLabs = labs.filter(l => l.status === "draft");
   const pendingLabs = labs.filter(l => l.status === "pending");
   const approvedLabs = labs.filter(l => l.status === "approved");
 
   const handleEdit = (id: string) => {
-    //todo: remove mock functionality - navigate to edit page
-    console.log('Edit lab:', id);
     setLocation(`/author/labs/${id}/edit`);
   };
 
-  const handleSubmit = (id: string) => {
-    //todo: remove mock functionality - replace with API call
-    console.log('Submit lab:', id);
-    setLabs(labs.map(l => l.id === id ? { ...l, status: "pending" as const } : l));
-    toast({
-      title: "Lab Submitted",
-      description: "Your lab has been submitted for review.",
-    });
+  const handleSubmit = async (id: string) => {
+    try {
+      await api.submitLab(parseInt(id));
+      toast({
+        title: "Lab Submitted",
+        description: "Your lab has been submitted for review.",
+      });
+      await loadLabs();
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to submit lab",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleView = (id: string) => {
-    //todo: remove mock functionality - navigate to detail page
-    console.log('View lab:', id);
     setLocation(`/author/labs/${id}`);
   };
 
   const handleCreateNew = () => {
-    //todo: remove mock functionality - navigate to create page
-    console.log('Create new lab');
     setLocation('/author/labs/new');
   };
+
+  if (loading) {
+    return (
+      <div className="p-6 space-y-8">
+        <div className="flex items-center justify-center h-64">
+          <p className="text-muted-foreground">Loading labs...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-8">
@@ -148,9 +147,14 @@ export default function AuthorLabs() {
             draftLabs.map(lab => (
               <LabCard
                 key={lab.id}
-                {...lab}
-                onEdit={() => handleEdit(lab.id)}
-                onSubmit={() => handleSubmit(lab.id)}
+                id={lab.id.toString()}
+                title={lab.title}
+                description={lab.description}
+                status={lab.status as any}
+                authorName="You"
+                updatedAt={new Date(lab.updatedAt)}
+                onEdit={() => handleEdit(lab.id.toString())}
+                onSubmit={() => handleSubmit(lab.id.toString())}
               />
             ))
           )}
@@ -171,8 +175,13 @@ export default function AuthorLabs() {
             [...pendingLabs, ...approvedLabs].map(lab => (
               <LabCard
                 key={lab.id}
-                {...lab}
-                onView={() => handleView(lab.id)}
+                id={lab.id.toString()}
+                title={lab.title}
+                description={lab.description}
+                status={lab.status as any}
+                authorName="You"
+                updatedAt={new Date(lab.updatedAt)}
+                onView={() => handleView(lab.id.toString())}
               />
             ))
           )}

@@ -173,7 +173,7 @@ export const isAdmin: RequestHandler = async (req, res, next) => {
   next();
 };
 
-// Middleware to check if user is author
+// Middleware to check if user is author or admin
 export const isAuthor: RequestHandler = async (req, res, next) => {
   const user = req.user as any;
   const userId = user?.claims?.sub;
@@ -183,7 +183,7 @@ export const isAuthor: RequestHandler = async (req, res, next) => {
   }
 
   const dbUser = await storage.getUser(userId);
-  if (!dbUser || dbUser.role !== "author") {
+  if (!dbUser || (dbUser.role !== "author" && dbUser.role !== "admin")) {
     return res.status(403).json({ message: "Forbidden - Author access required" });
   }
 

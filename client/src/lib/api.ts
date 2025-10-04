@@ -77,4 +77,43 @@ export const api = {
     });
     if (!response.ok) throw new Error("Failed to delete lab");
   },
+
+  // Submit lab for review
+  submitLab: async (id: number): Promise<Lab> => {
+    const response = await fetch(`${API_BASE}/labs/${id}/submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!response.ok) throw new Error("Failed to submit lab");
+    return response.json();
+  },
+
+  // Approve lab (admin only)
+  approveLab: async (id: number, comment?: string): Promise<Lab> => {
+    const response = await fetch(`${API_BASE}/labs/${id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ comment }),
+    });
+    if (!response.ok) throw new Error("Failed to approve lab");
+    return response.json();
+  },
+
+  // Reject lab (admin only)
+  rejectLab: async (id: number, comment: string): Promise<Lab> => {
+    const response = await fetch(`${API_BASE}/labs/${id}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ comment }),
+    });
+    if (!response.ok) throw new Error("Failed to reject lab");
+    return response.json();
+  },
+
+  // Get current user
+  getCurrentUser: async (): Promise<any> => {
+    const response = await fetch(`${API_BASE}/auth/user`);
+    if (!response.ok) throw new Error("Failed to fetch user");
+    return response.json();
+  },
 };
